@@ -1,6 +1,6 @@
 from time import sleep
 
-from tracer import Tracer
+from Tracer import Tracer
 
 
 tracer = Tracer(log=False)
