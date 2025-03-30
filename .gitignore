@@ -1,0 +1,12 @@
+# Python cache (+ mypy and pytest)
+__pycache__/
+.mypy_cache/
+
+# Python environment
+.venv/
+.env/
+
+# JetBrains IDE
+/.idea/
+
+!.gitkeep
