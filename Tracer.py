@@ -39,6 +39,10 @@ class FunctionData:
         self._enabled = False
         self.start_times = []
 
+    def reset(self):
+        self.runs = []
+        self.start_times = []
+
 
 def get_code(func: Callable):
     return func.__code__
@@ -74,19 +78,26 @@ class Tracer:
         if self._log_enabled:
             print(f'{self.LOG_PREFIX}', *messages)
 
-    def reset(self):
-        for code, func_data in self._functions.items():
-            func_data.runs = []
-            func_data.start_times = []
+    def _apply_wrapper(self, item: Callable | CodeType):
+        if isinstance(item, CodeType):
+            return item
+        code = get_code(item)
+        return self._wrapper_mapping.get((get_func_name(item), code), code)
+
+    def reset(self, *functions: Callable):
+        for item in functions or self._functions:
+            code = self._apply_wrapper(item)
+
+            if code not in self._functions:
+                self._log(f'Cannot reset function "{get_code_name(code)}" — it is not traced')
+                continue
+
+            self._functions[code].reset()
             self._log(f'Reset trace on "{get_code_name(code)}"')
 
     def toggle(self, *functions: Callable | CodeType, summ_recursive: bool = False, on: bool | None = None):
         for item in functions:
-            if isinstance(item, CodeType):
-                code = item
-            else:
-                code = get_code(item)
-                code = self._wrapper_mapping.get((get_func_name(item), code), code)
+            code = self._apply_wrapper(item)
 
             if on is not None:
                 enable = on
@@ -118,16 +129,10 @@ class Tracer:
             self._log('setprofile is temporary disabled')
 
     def enable(self, *functions: Callable | CodeType, summ_recursive: bool = False):
-        self.toggle(*functions, summ_recursive=summ_recursive, on=True)
-
-    def enable_all(self, summ_recursive: bool = False):
-        self.enable(*self._functions, summ_recursive=summ_recursive)
+        self.toggle(*(functions or self._functions), summ_recursive=summ_recursive, on=True)
 
     def disable(self, *functions: Callable | CodeType):
-        self.toggle(*functions, on=False)
-
-    def disable_all(self):
-        self.disable(*self._functions)
+        self.toggle(*(functions or self._functions), on=False)
 
     def __call__(self, wrapped_function: Callable | None = None, summ_recursive: bool = False) -> Callable:
         def decorator(func: Callable) -> Callable:

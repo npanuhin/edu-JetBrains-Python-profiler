@@ -91,7 +91,7 @@ class_instance.main_function()  # main_function: 0.7s (or 0.4s non-recursive), i
 class_instance.toggled_function()  # toggled_function: 0.1s
 tracer.disable(class_instance.toggled_function)
 class_instance.toggled_function()
-tracer.enable_all()
+tracer.enable()
 class_instance.toggled_function()  # toggled_function: 0.1s
 
 tracer.toggle(class_instance.function_without_decorator, summ_recursive=False)
@@ -100,7 +100,7 @@ tracer.toggle(class_instance.function_without_decorator)
 
 tracer.enable(SomeClass.class_function)
 SomeClass.class_function()  # class_function: 0.1s
-tracer.disable_all()
+tracer.disable()
 
 # Expected result:
 # main_function: 2.1s (or 1.2s non-recursive)
@@ -109,4 +109,5 @@ tracer.disable_all()
 # function_without_decorator: 0.1s
 # class_function: 0.1s
 
-print(tracer)
+# print(tracer.times)  # Machine-readable dictionary
+print(tracer)          # Human-readable table
