@@ -1,13 +1,35 @@
 from typing import Callable, Generator, Any
+from types import FrameType, CodeType
+
+from dataclasses import dataclass, field
 from collections import defaultdict
 from time import perf_counter
 from functools import wraps
-from types import FrameType
 from sys import setprofile
 
 
+@dataclass
+class FunctionData:
+    enabled: bool = True
+    runs: list[float] = field(default_factory=list)
+    start_times: list[float] = field(default_factory=list)
+    summ_recursive: bool = False
+
+
+def get_code(func: Callable):
+    return func.__code__
+
+
+def get_func_name(func: Callable) -> str:
+    return func.__qualname__
+
+
+def get_code_name(code: CodeType) -> str:
+    return code.co_qualname
+
+
 class Tracer:
-    LOG_PREFIX = '[TRACE]'
+    LOG_PREFIX = '[TRACER]'
 
     STATUS_TITLE = 'Trace Status'
     # STATUS_TITLE = None  # Set this variable to None to disable Status Title in the output
@@ -18,99 +40,129 @@ class Tracer:
     STATUS_NONE = 'No functions traced'
     PRECISION = 4
 
-    def __init__(self, log=False):
+    def __init__(self, log: bool = False, use_setprofile: bool = False):
         self._log_enabled = log
-
-        self._traced_functions: set[str] = set()
-        self._call_times = defaultdict(float)
-        self._start_times = {}
-
-        self.toggle()
+        self._setprofile_watch: set[CodeType] = set()
+        self._functions: dict[CodeType, FunctionData] = defaultdict(FunctionData)
+        self._wrapper_mapping: dict[tuple[str, CodeType], CodeType] = {}
 
     def _log(self, *messages: str):
         if self._log_enabled:
             print(f'{self.LOG_PREFIX}', *messages)
 
-    @classmethod
-    def _get_func_name(cls, func: Callable | str) -> str:
-        return func if isinstance(func, str) else f'{func.__module__}.{func.__name__}'
+    def reset(self):
+        for code, func_data in self._functions.items():
+            func_data.runs = []
+            func_data.start_times = []
+            self._log(f'Reset trace on "{get_code_name(code)}"')
 
-    def toggle(self, *functions: Callable | str, **functions_kwargs: bool):
-        for func in functions:
-            func_name = self._get_func_name(func)
-            functions_kwargs[func_name] = func_name not in self._traced_functions
-
-        for func_name, should_trace in functions_kwargs.items():
-            if should_trace:
-                self._traced_functions.add(func_name)
+    def toggle(self, *functions: Callable | CodeType, on: bool | None = None):
+        for item in functions:
+            if isinstance(item, CodeType):
+                code = item
             else:
-                self._traced_functions.remove(func_name)
-                self._start_times.pop(func_name, None)
+                code = get_code(item)
+                code = self._wrapper_mapping.get((get_func_name(item), code), code)
 
-        if self._traced_functions:
-            self._log('Tracing functions:', *self._traced_functions)
+            if on is not None:
+                enable = on
+            elif code not in self._functions:
+                enable = True
+            else:
+                enable = not self._functions[code].enabled
+
+            if enable:
+                if code not in self._functions:
+                    self._log(f'Enabling setprofile trace on "{get_code_name(code)}"')
+                    self._setprofile_watch.add(code)
+                else:
+                    self._log(f'Enabling trace on "{get_code_name(code)}"')
+            else:
+                self._log(f'Disabling trace on "{get_code_name(code)}"')
+                self._functions[code].start_times = []
+                self._setprofile_watch.discard(code)
+
+            self._functions[code].enabled = enable
+
+        if self._setprofile_watch:
+            self._log('setprofile is enabled on the following functions:', *map(get_code_name, self._setprofile_watch))
             setprofile(self._trace_calls)
         else:
             setprofile(None)
-            self._log('Tracing disabled')
+            self._log('setprofile is temporary disabled')
 
-    def enable(self, *functions: Callable | str, enable=True):
-        self.toggle(*{self._get_func_name(func): enable for func in functions})
+    def enable(self, *functions: Callable | CodeType):
+        self.toggle(*functions, on=True)
 
     def enable_all(self):
-        self.enable(*self._traced_functions)
+        self.enable(*self._functions)
 
-    def disable(self, *functions: Callable | str):
-        self.enable(*functions, enable=False)
+    def disable(self, *functions: Callable | CodeType):
+        self.toggle(*functions, on=False)
 
     def disable_all(self):
-        self.disable(*self._traced_functions)
+        self.disable(*self._functions)
 
-    def reset(self, *functions: Callable | str):
-        for func in functions:
-            self._call_times.pop(self._get_func_name(func), None)
+    def __call__(self, wrapped_function: Callable | None = None, summ_recursive: bool = False) -> Callable:
+        def decorator(func: Callable) -> Callable:
+            code = get_code(func)
 
-    def __call__(self, func: Callable) -> Callable:
-        self.enable(self._get_func_name(func))
+            @wraps(func)
+            def wrapper(*args, **kwargs):
+                # self._log(f'Entering {get_code_name(code)}')
 
-        @wraps(func)
-        def wrapper(*args, **kwargs):
-            return func(*args, **kwargs)
+                if not self._functions[code].enabled:
+                    # self._log(f'Skipping {get_code_name(code)}')
+                    return func(*args, **kwargs)
 
-        return wrapper
+                self._functions[code].start_times.append(perf_counter())
+                result = func(*args, **kwargs)
+                if self._functions[code].start_times:  # If reset did not happen during execution:
+                    self._functions[code].runs.append(
+                        perf_counter() - self._functions[code].start_times.pop()
+                    )
+
+                # self._log(f'Exited {get_code_name(code)}')
+                return result
+
+            self._wrapper_mapping[(get_func_name(func), get_code(wrapper))] = code
+
+            self._log(f'Enabling simple trace on "{get_code_name(code)}" due to decorator')
+
+            if code in self._functions:
+                # I doubt this will even happen, but just in case
+                assert self._functions[code].summ_recursive == summ_recursive, \
+                    'Changing `summ_recursive` is not supported'
+
+            self._functions[code].summ_recursive = summ_recursive
+
+            return wrapper
+
+        if wrapped_function is not None:
+            return decorator(wrapped_function)
+
+        return decorator
 
     def _trace_calls(self, frame: FrameType, event: str, arg: Any) -> Callable:
-        if event == 'call':
-            func_name = f'{frame.f_globals["__name__"]}.{frame.f_code.co_qualname}'
-            # self._log(f'call: {func_name}')
+        if frame.f_code in self._setprofile_watch:
+            if event == 'call':
+                assert frame.f_code in self._functions, f'Broken internal invariant: setprofile-watch function ' \
+                    f'{get_code_name(frame.f_code)} is not recognized'
+                self._functions[frame.f_code].start_times.append(perf_counter())
 
-            if func_name in self._traced_functions:
-                end_time = perf_counter()
-                self._start_times[frame] = end_time
+            elif event == 'return':
+                assert frame.f_code in self._functions, f'Broken internal invariant: setprofile-watch function ' \
+                    f'{get_code_name(frame.f_code)} is not recognized'
 
-        elif event == 'return':
-            func_name = f'{frame.f_globals["__name__"]}.{frame.f_code.co_qualname}'
-            # self._log(f'return: {func_name}')
-
-            if func_name in self._traced_functions and frame in self._start_times:
-                end_time = perf_counter()
-                self._call_times[func_name] += end_time - self._start_times.pop(frame)
+                self._functions[frame.f_code].runs.append(
+                    perf_counter() - self._functions[frame.f_code].start_times.pop()
+                )
 
         return self._trace_calls
 
     @property
     def times(self) -> dict[str, float]:
-        return self._call_times
-
-    @property
-    def time_sorted(self):
-        if not self._call_times:
-            return 'No functions traced'
-
-        print('Function Execution Time (seconds):')
-        print('----------------------------------')
-        for func, duration in self._call_times.items():
-            print(f'{func}: {duration:.6f}s')
+        return {get_code_name(func): sum(data.runs) for func, data in self._functions.items()}
 
     def _generate_string(self) -> Generator[str, None, None]:
         column_length = [0] * 2
@@ -119,7 +171,9 @@ class Tracer:
             for index, header in enumerate(self.STATUS_HEADERS):
                 column_length[index] = max(column_length[index], len(header))
 
-        column_length[0] = max(column_length[0], max(map(len, self._call_times.keys()), default=0))
+        column_length[0] = max(column_length[0], max(
+            map(len, map(get_code_name, self._functions)), default=0
+        ))
         column_length[1] = max(column_length[1], self.PRECISION + 3)
         total_length = sum(column_length) + len(column_length) * 3 + 1
 
@@ -127,11 +181,14 @@ class Tracer:
             column_length[0] += len(self.STATUS_TITLE) + 4 - total_length
             total_length = sum(column_length) + len(column_length) * 3 + 1
 
+        if not self._functions:
+            total_length = max(len(self.STATUS_NONE or '') + 4, len(self.STATUS_TITLE or '') + 4)
+
         if self.STATUS_TITLE:
             yield '┌' + '─' * (total_length - 2) + '┐'
             yield '│ ' + self.STATUS_TITLE.center(total_length - 4) + ' │'
 
-        if not self._traced_functions:
+        if not self._functions:
             yield '├' + '─' * (total_length - 2) + '┤'
             yield '│ ' + self.STATUS_NONE.center(total_length - 4) + ' │'
             yield '└' + '─' * (total_length - 2) + '┘'
@@ -152,12 +209,12 @@ class Tracer:
 
                 yield '├' + '─' * (column_length[0] + 2) + '┼' + '─' * (column_length[1] + 2) + '┤'
 
-            for func, duration in self._call_times.items():
+            for func, data in self._functions.items():
                 yield ' '.join((
                     '│',
-                    func.ljust(column_length[0]),
+                    get_code_name(func).ljust(column_length[0]),
                     '→',
-                    f'{duration:.{self.PRECISION}f}s'.center(column_length[1]),
+                    f'{sum(data.runs):.{self.PRECISION}f}s'.center(column_length[1]),
                     '│'
                 ))
 
