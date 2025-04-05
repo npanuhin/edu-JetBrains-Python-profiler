@@ -15,6 +15,18 @@ class FunctionData:
     start_times: list[float] = field(default_factory=list)
     summ_recursive: bool = False
 
+    def begin(self):
+        self.start_times.append(perf_counter())
+
+    def end(self):
+        if not self.start_times:  # If reset happened during execution
+            return
+
+        start_time = self.start_times.pop()
+
+        if self.summ_recursive or not self.start_times:
+            self.runs.append(perf_counter() - start_time)
+
 
 def get_code(func: Callable):
     return func.__code__
@@ -115,12 +127,9 @@ class Tracer:
                     # self._log(f'Skipping {get_code_name(code)}')
                     return func(*args, **kwargs)
 
-                self._functions[code].start_times.append(perf_counter())
+                self._functions[code].begin()
                 result = func(*args, **kwargs)
-                if self._functions[code].start_times:  # If reset did not happen during execution:
-                    self._functions[code].runs.append(
-                        perf_counter() - self._functions[code].start_times.pop()
-                    )
+                self._functions[code].end()
 
                 # self._log(f'Exited {get_code_name(code)}')
                 return result
@@ -148,15 +157,12 @@ class Tracer:
             if event == 'call':
                 assert frame.f_code in self._functions, f'Broken internal invariant: setprofile-watch function ' \
                     f'{get_code_name(frame.f_code)} is not recognized'
-                self._functions[frame.f_code].start_times.append(perf_counter())
+                self._functions[frame.f_code].begin()
 
             elif event == 'return':
                 assert frame.f_code in self._functions, f'Broken internal invariant: setprofile-watch function ' \
                     f'{get_code_name(frame.f_code)} is not recognized'
-
-                self._functions[frame.f_code].runs.append(
-                    perf_counter() - self._functions[frame.f_code].start_times.pop()
-                )
+                self._functions[frame.f_code].end()
 
         return self._trace_calls
 

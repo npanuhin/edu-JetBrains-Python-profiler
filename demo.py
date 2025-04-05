@@ -18,12 +18,16 @@ class SomeClass:  # No need to specify decorator for the class
     def __init__(self):
         pass
 
+    # With `summ_recursive=True` it will add up the time of all function calls, including recursive ones
+    # If you turn this off, it will only count the outermost call
+    # @tracer(summ_recursive=False)
     @tracer(summ_recursive=True)
     def main_function(self, recursive: bool = True):
         """
         First run (recursive=True): 0.1s + {recursion}
-        Second run: 0.3s
-        Total time: {first run} + {second run} = (0.1s + 0.3s) + 0.3s = 0.7s
+        Second run (recursive=False): 0.3s
+        Total time (summ_recursive=True): {first run} + {second run} = (0.1s + 0.3s) + 0.3s = 0.7s
+        Total time (summ_recursive=False): {first run} = (0.1s + 0.3s) = 0.4s
         """
 
         def inner_function_disabled():
@@ -72,9 +76,9 @@ class SomeClass:  # No need to specify decorator for the class
 
 class_instance = SomeClass()
 
-class_instance.main_function()  # main_function: 0.7s, inner_function: 0.1s
-class_instance.main_function()  # main_function: 0.7s, inner_function: 0.1s
-class_instance.main_function()  # main_function: 0.7s, inner_function: 0.1s
+class_instance.main_function()  # main_function: 0.7s (or 0.4s non-recursive), inner_function: 0.1s
+class_instance.main_function()  # main_function: 0.7s (or 0.4s non-recursive), inner_function: 0.1s
+class_instance.main_function()  # main_function: 0.7s (or 0.4s non-recursive), inner_function: 0.1s
 
 # `setprofile` introduces some overhead but unlocks powerful capabilities.
 
@@ -99,7 +103,7 @@ SomeClass.class_function()  # class_function: 0.1s
 tracer.disable_all()
 
 # Expected result:
-# main_function: 2.1s
+# main_function: 2.1s (or 1.2s non-recursive)
 # toggled_function: 0.2s
 # inner_function: 0.3s
 # function_without_decorator: 0.1s
