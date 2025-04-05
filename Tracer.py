@@ -10,22 +10,34 @@ from sys import setprofile
 
 @dataclass
 class FunctionData:
-    enabled: bool = True
-    runs: list[float] = field(default_factory=list)
-    start_times: list[float] = field(default_factory=list)
     summ_recursive: bool = False
+    runs: list[float] = field(default_factory=list)
+
+    _start_times: list[float] = field(init=False, default_factory=list)
+    _enabled: bool = field(init=False, default=True)
 
     def begin(self):
-        self.start_times.append(perf_counter())
+        self._start_times.append(perf_counter())
 
     def end(self):
-        if not self.start_times:  # If reset happened during execution
+        if not self._start_times:  # If reset happened during execution
             return
 
-        start_time = self.start_times.pop()
+        start_time = self._start_times.pop()
 
-        if self.summ_recursive or not self.start_times:
+        if self.summ_recursive or not self._start_times:
             self.runs.append(perf_counter() - start_time)
+
+    @property
+    def enabled(self):
+        return self._enabled
+
+    def enable(self):
+        self._enabled = True
+
+    def disable(self):
+        self._enabled = False
+        self.start_times = []
 
 
 def get_code(func: Callable):
@@ -89,12 +101,12 @@ class Tracer:
                     self._setprofile_watch.add(code)
                 else:
                     self._log(f'Enabling trace on "{get_code_name(code)}"')
+                self._functions[code].enable()
+
             else:
                 self._log(f'Disabling trace on "{get_code_name(code)}"')
-                self._functions[code].start_times = []
                 self._setprofile_watch.discard(code)
-
-            self._functions[code].enabled = enable
+                self._functions[code].disable()
 
         if self._setprofile_watch:
             self._log('setprofile is enabled on the following functions:', *map(get_code_name, self._setprofile_watch))
@@ -138,10 +150,9 @@ class Tracer:
 
             self._log(f'Enabling simple trace on "{get_code_name(code)}" due to decorator')
 
-            if code in self._functions:
-                # I doubt this will even happen, but just in case
-                assert self._functions[code].summ_recursive == summ_recursive, \
-                    'Changing `summ_recursive` is not supported'
+            # I doubt this will even happen, but just in case
+            assert code not in self._functions or self._functions[code].summ_recursive == summ_recursive, \
+                'Changing `summ_recursive` is not supported'
 
             self._functions[code].summ_recursive = summ_recursive
 
@@ -227,4 +238,4 @@ class Tracer:
             yield '└' + '─' * (column_length[0] + 2) + '┴' + '─' * (column_length[1] + 2) + '┘'
 
     def __str__(self) -> str:
-        return '\n'.join(map(str.rstrip, self._generate_string()))
+        return '\n'.join(self._generate_string())
