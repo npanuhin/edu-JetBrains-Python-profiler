@@ -94,7 +94,7 @@ class_instance.toggled_function()
 tracer.enable_all()
 class_instance.toggled_function()  # toggled_function: 0.1s
 
-tracer.toggle(class_instance.function_without_decorator)
+tracer.toggle(class_instance.function_without_decorator, summ_recursive=False)
 class_instance.function_without_decorator()  # function_without_decorator: 0.1s
 tracer.toggle(class_instance.function_without_decorator)
 

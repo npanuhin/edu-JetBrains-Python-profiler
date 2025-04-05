@@ -80,7 +80,7 @@ class Tracer:
             func_data.start_times = []
             self._log(f'Reset trace on "{get_code_name(code)}"')
 
-    def toggle(self, *functions: Callable | CodeType, on: bool | None = None):
+    def toggle(self, *functions: Callable | CodeType, summ_recursive: bool = False, on: bool | None = None):
         for item in functions:
             if isinstance(item, CodeType):
                 code = item
@@ -108,6 +108,8 @@ class Tracer:
                 self._setprofile_watch.discard(code)
                 self._functions[code].disable()
 
+            self._functions[code].summ_recursive = summ_recursive
+
         if self._setprofile_watch:
             self._log('setprofile is enabled on the following functions:', *map(get_code_name, self._setprofile_watch))
             setprofile(self._trace_calls)
@@ -115,11 +117,11 @@ class Tracer:
             setprofile(None)
             self._log('setprofile is temporary disabled')
 
-    def enable(self, *functions: Callable | CodeType):
-        self.toggle(*functions, on=True)
+    def enable(self, *functions: Callable | CodeType, summ_recursive: bool = False):
+        self.toggle(*functions, summ_recursive=summ_recursive, on=True)
 
-    def enable_all(self):
-        self.enable(*self._functions)
+    def enable_all(self, summ_recursive: bool = False):
+        self.enable(*self._functions, summ_recursive=summ_recursive)
 
     def disable(self, *functions: Callable | CodeType):
         self.toggle(*functions, on=False)
@@ -146,14 +148,8 @@ class Tracer:
                 # self._log(f'Exited {get_code_name(code)}')
                 return result
 
-            self._wrapper_mapping[(get_func_name(func), get_code(wrapper))] = code
-
             self._log(f'Enabling simple trace on "{get_code_name(code)}" due to decorator')
-
-            # I doubt this will even happen, but just in case
-            assert code not in self._functions or self._functions[code].summ_recursive == summ_recursive, \
-                'Changing `summ_recursive` is not supported'
-
+            self._wrapper_mapping[(get_func_name(func), get_code(wrapper))] = code
             self._functions[code].summ_recursive = summ_recursive
 
             return wrapper
