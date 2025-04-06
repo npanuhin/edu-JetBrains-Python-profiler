@@ -44,7 +44,9 @@ tracer.reset()                        # Clears all recoded data for all function
 tracer.reset(*function_references)    # Clears all recoded data for given functions
 ```
 
-For the otuput format I implemented a simple sum of all calls for each function, accessible both programmatically and in human-readable format. The output data can be extended depending on the need in the future.
+For the output format I implemented a simple sum of all calls for each function, accessible both programmatically and in human-readable format. The output data can be extended depending on the need in the future.
+
+I've also included a handy feature for recursive functions: you can choose whether to calculate the total time by summing every recursive call or by counting only the outermost ones. This behavior can be toggled using the `sum_recursive=True/False` argument, available in both the decorator and the `toggle/enable` methods.
 
 ```python
 print(tracer.times)  # Machine-readable dictionary  {function_name: sum_of_times}
